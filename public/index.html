@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sleep Tracker Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      .gradient-bg {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      }
+      .card {
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+    </style>
+  </head>
+  <body class="gradient-bg min-h-screen text-white">
+    <div class="container mx-auto p-6">
+      <h1 class="text-3xl font-bold mb-8 flex items-center">
+        <span class="text-4xl mr-2">🌙</span> Sleep Tracker Dashboard
+      </h1>
+
+      <div class="flex gap-6">
+        <div class="w-1/2">
+          <!-- Combined Stats Card -->
+          <div class="card rounded-lg p-4 mb-6 h-[40%]">
+            <h3 class="text-xl mb-2">Combined Statistics</h3>
+            <div
+              class="grid grid-cols-3 gap-4 pt-[20px]"
+              id="combinedStats"
+            ></div>
+          </div>
+          <!-- Status Cards -->
+          <div
+            class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8"
+            id="statusCards"
+          ></div>
+        </div>
+
+        <!-- Sleep History Chart -->
+        <div class="card rounded-lg p-4 mb-8 h-[50vh] w-1/2">
+          <h2 class="text-xl mb-4">Sleep History Chart</h2>
+          <canvas id="sleepAreaChart" class="p-10"></canvas>
+        </div>
+      </div>
+      <!-- Recent History -->
+      <div class="card rounded-lg p-4">
+        <h2 class="text-xl mb-4">Recent Sleep History</h2>
+        <div id="historyTable" class="overflow-x-auto"></div>
+      </div>
+    </div>
+
+    <script>
+      const userMapping = {
+        "212687053026@c.us": "Bilal",
+        "212767379926@c.us": "Walid",
+      };
+
+      function getUserName(userId) {
+        return userMapping[userId] || userId;
+      }
+
+      // Fetch and update all data
+      async function updateDashboard() {
+        const [history, stats, status] = await Promise.all([
+          fetch("/api/history").then((r) => r.json()),
+          fetch("/api/stats").then((r) => r.json()),
+          fetch("/api/status").then((r) => r.json()),
+        ]);
+
+        // Update combined stats
+        const combinedStats = document.getElementById("combinedStats");
+        const statsValues = Object.values(stats);
+        const avgSleepDebt =
+          statsValues.reduce((acc, curr) => acc + curr.sleepDebt, 0) /
+          statsValues.length;
+
+        // Find user with best streak
+        let maxStreak = 0;
+        let bestStreakUser = "";
+        Object.entries(stats).forEach(([userId, stat]) => {
+          if (stat.bestStreak > maxStreak) {
+            maxStreak = stat.bestStreak;
+            bestStreakUser = getUserName(userId);
+          }
+        });
+        const avgQuality =
+          statsValues.reduce((acc, curr) => acc + curr.goodNightPercentage, 0) /
+          statsValues.length;
+
+        combinedStats.innerHTML = `
+            <div class="text-center">
+                <p class="text-2xl font-bold text-blue-400">${avgSleepDebt.toFixed(
+                  1
+                )}h</p>
+                <p class="text-sm text-gray-400">Avg Sleep Debt</p>
+            </div>
+            <div class="text-center">
+                <p class="text-2xl font-bold text-green-400">${maxStreak}</p>
+                <p class="text-sm text-gray-400">Best Streak by ${bestStreakUser}</p>
+            </div>
+            <div class="text-center">
+                <p class="text-2xl font-bold text-purple-400">${avgQuality.toFixed(
+                  1
+                )}%</p>
+                <p class="text-sm text-gray-400">Avg Quality</p>
+            </div>
+        `;
+
+        // Update status cards
+        const statusCards = document.getElementById("statusCards");
+        statusCards.innerHTML = Object.entries(stats)
+          .map(
+            ([userId, stat]) => `
+                <div class="card rounded-lg p-4">
+                    <h3 class="text-xl mb-2">${getUserName(userId)}</h3>
+                    <p class="text-blue-400">Status: ${
+                      status.states[userId] || "Unknown"
+                    }</p>
+                    <div class="mt-4">
+                        <p>Sleep Debt: ${stat.sleepDebt.toFixed(1)}h</p>
+                        <p>Streak: ${stat.goodSleepStreak} days</p>
+                        <p>Good Nights: ${stat.goodNightPercentage.toFixed(
+                          1
+                        )}%</p>
+                    </div>
+                </div>
+            `
+          )
+          .join("");
+
+        // Create area chart for sleep history
+        const areaCtx = document
+          .getElementById("sleepAreaChart")
+          .getContext("2d");
+        new Chart(areaCtx, {
+          type: "line",
+          data: {
+            labels: [], // Days
+            datasets: [], // Sleep intervals for each user
+          },
+          options: {
+            responsive: true,
+            scales: {
+              x: { title: { display: true, text: "Day" } },
+              y: {
+                min: 0,
+                max: 24,
+                title: { display: true, text: "Hour of Day" },
+              },
+            },
+          },
+        });
+
+        // Update history table
+        const historyTable = document.getElementById("historyTable");
+        historyTable.innerHTML = `
+                <table class="min-w-full">
+                    <thead>
+                        <tr>
+                            <th class="text-left p-2">User</th>
+                            <th class="text-left p-2">Sleep Time</th>
+                            <th class="text-left p-2">Wake Time</th>
+                            <th class="text-left p-2">Duration</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${Object.entries(history)
+                          .flatMap(([userId, sessions]) =>
+                            sessions.slice(0, 5).map((session) => {
+                              const start = new Date(session.start);
+                              const end = session.end
+                                ? new Date(session.end)
+                                : null;
+                              const duration = end
+                                ? ((end - start) / (1000 * 60 * 60)).toFixed(1)
+                                : "N/A";
+                              return `
+                                    <tr class="border-t border-gray-700">
+                                        <td class="p-2">${getUserName(
+                                          userId
+                                        )}</td>
+                                        <td class="p-2">${start.toLocaleTimeString()}</td>
+                                        <td class="p-2">${
+                                          end
+                                            ? end.toLocaleTimeString()
+                                            : "Not yet"
+                                        }</td>
+                                        <td class="p-2">${duration}h</td>
+                                    </tr>
+                                `;
+                            })
+                          )
+                          .join("")}
+                    </tbody>
+                </table>
+            `;
+      }
+
+      // Initial load
+      updateDashboard();
+      // Refresh every minute
+      setInterval(updateDashboard, 60000);
+    </script>
+  </body>
+</html>
